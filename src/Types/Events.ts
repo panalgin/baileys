@@ -8,9 +8,13 @@ import { GroupMetadata, ParticipantAction } from './GroupMetadata'
 import { Label } from './Label'
 import { LabelAssociation } from './LabelAssociation'
 import { MessageUpsertType, MessageUserReceiptUpdate, WAMessage, WAMessageKey, WAMessageUpdate } from './Message'
-import { ConnectionState } from './State'
+import { ConfigurationState, ConnectionState } from './State'
+
 
 export type BaileysEventMap = {
+    'configuration.set': Partial<ConfigurationState>
+    'configuration.update': Partial<ConfigurationState>
+    
     /** connection state has been updated -- WS closed, opened, connecting etc. */
 	'connection.update': Partial<ConnectionState>
     /** credentials updated -- some metadata, keys or something */
