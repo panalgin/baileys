@@ -390,13 +390,8 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 
 			break
 		case 'picture':
-			console.log('picture-node:', node)
-
 			const setPicture = getBinaryNodeChild(node, 'set')
 			const delPicture = getBinaryNodeChild(node, 'delete')
-
-			console.log('setPicture:', setPicture)
-			console.log('delPicture:', delPicture)
 
 			ev.emit('contacts.update', [{
 				id: jidNormalizedUser(node?.attrs?.from) || ((setPicture || delPicture)?.attrs?.hash) || '',
