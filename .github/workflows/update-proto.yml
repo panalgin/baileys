@@ -26,6 +26,8 @@ jobs:
         run: |
           yarn
           yarn --pure-lockfile --cwd proto-extract
+          yarn add pbts
+          yarn add pbjs
 
       - name: Update WAProto.proto
         id: wa_proto_info
