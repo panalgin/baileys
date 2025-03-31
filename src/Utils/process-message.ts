@@ -1,20 +1,20 @@
 import { AxiosRequestConfig } from 'axios'
-import type { Logger } from 'pino'
 import { proto } from '../../WAProto'
-import { AuthenticationCreds, BaileysEventEmitter, Chat, GroupMetadata, ParticipantAction, RequestJoinAction, RequestJoinMethod, SignalKeyStoreWithTransaction, SocketConfig, WAMessageStubType } from '../Types'
+import { AuthenticationCreds, BaileysEventEmitter, CacheStore, Chat, GroupMetadata, ParticipantAction, RequestJoinAction, RequestJoinMethod, SignalKeyStoreWithTransaction, WAMessageStubType } from '../Types'
 import { getContentType, normalizeMessageContent } from '../Utils/messages'
 import { areJidsSameUser, isJidBroadcast, isJidStatusBroadcast, jidNormalizedUser } from '../WABinary'
 import { aesDecryptGCM, hmacSign } from './crypto'
-import { getKeyAuthor, toNumber } from './generics'
+import { toNumber } from './generics'
 import { downloadAndProcessHistorySyncNotification } from './history'
+import { ILogger } from './logger'
 
 type ProcessMessageContext = {
 	shouldProcessHistoryMsg: boolean
+	placeholderResendCache?: CacheStore
 	creds: AuthenticationCreds
 	keyStore: SignalKeyStoreWithTransaction
 	ev: BaileysEventEmitter
-	getMessage: SocketConfig['getMessage']
-	logger?: Logger
+	logger?: ILogger
 	options: AxiosRequestConfig<{}>
 }
 
@@ -33,7 +33,7 @@ const REAL_MSG_REQ_ME_STUB_TYPES = new Set([
 export const cleanMessage = (message: proto.IWebMessageInfo, meId: string) => {
 	// ensure remoteJid and participant doesn't have device or agent in it
 	message.key.remoteJid = jidNormalizedUser(message.key.remoteJid!)
-	message.key.participant = message.key.participant ? jidNormalizedUser(message.key.participant!) : undefined
+	message.key.participant = message.key.participant ? jidNormalizedUser(message.key.participant) : undefined
 	const content = normalizeMessageContent(message.message)
 	// if the message has a reaction, ensure fromMe & remoteJid are from our perspective
 	if(content?.reactionMessage) {
@@ -152,12 +152,12 @@ const processMessage = async(
 	message: proto.IWebMessageInfo,
 	{
 		shouldProcessHistoryMsg,
+		placeholderResendCache,
 		ev,
 		creds,
 		keyStore,
 		logger,
-		options,
-		getMessage
+		options
 	}: ProcessMessageContext
 ) => {
 	const meId = creds.me!.id
@@ -167,6 +167,7 @@ const processMessage = async(
 	const isRealMsg = isRealMessage(message, meId)
 
 	if(isRealMsg) {
+		chat.messages = [{ message }]
 		chat.conversationTimestamp = toNumber(message.messageTimestamp)
 		// only increment unread count if not CIPHERTEXT and from another person
 		if(shouldIncrementChatUnread(message)) {
@@ -190,7 +191,7 @@ const processMessage = async(
 	if(protocolMsg) {
 		switch (protocolMsg.type) {
 		case proto.Message.ProtocolMessage.Type.HISTORY_SYNC_NOTIFICATION:
-			const histNotification = protocolMsg!.historySyncNotification!
+			const histNotification = protocolMsg.historySyncNotification!
 			const process = shouldProcessHistoryMsg
 			const isLatest = !creds.processedHistoryMessages?.length
 
@@ -202,19 +203,28 @@ const processMessage = async(
 			}, 'got history notification')
 
 			if(process) {
-				ev.emit('creds.update', {
-					processedHistoryMessages: [
-						...(creds.processedHistoryMessages || []),
-						{ key: message.key, messageTimestamp: message.messageTimestamp }
-					]
-				})
+				if(histNotification.syncType !== proto.HistorySync.HistorySyncType.ON_DEMAND) {
+					ev.emit('creds.update', {
+						processedHistoryMessages: [
+							...(creds.processedHistoryMessages || []),
+							{ key: message.key, messageTimestamp: message.messageTimestamp }
+						]
+					})
+				}
 
 				const data = await downloadAndProcessHistorySyncNotification(
 					histNotification,
 					options
 				)
 
-				ev.emit('messaging-history.set', { ...data, isLatest })
+				ev.emit('messaging-history.set', {
+					...data,
+					isLatest:
+						histNotification.syncType !== proto.HistorySync.HistorySyncType.ON_DEMAND
+							? isLatest
+							: undefined,
+					peerDataRequestSessionId: histNotification.peerDataRequestSessionId
+				})
 			}
 
 			break
@@ -267,18 +277,46 @@ const processMessage = async(
 		case proto.Message.ProtocolMessage.Type.PEER_DATA_OPERATION_REQUEST_RESPONSE_MESSAGE:
 			const response = protocolMsg.peerDataOperationRequestResponseMessage!
 			if(response) {
+				placeholderResendCache?.del(response.stanzaId!)
+				// TODO: IMPLEMENT HISTORY SYNC ETC (sticker uploads etc.).
 				const { peerDataOperationResult } = response
 				for(const result of peerDataOperationResult!) {
 					const { placeholderMessageResendResponse: retryResponse } = result
+					//eslint-disable-next-line max-depth
 					if(retryResponse) {
 						const webMessageInfo = proto.WebMessageInfo.decode(retryResponse.webMessageInfoBytes!)
-						ev.emit('messages.update', [
-							{ key: webMessageInfo.key, update: { message: webMessageInfo.message } }
-						])
+						// wait till another upsert event is available, don't want it to be part of the PDO response message
+						setTimeout(() => {
+							ev.emit('messages.upsert', {
+								messages: [webMessageInfo],
+								type: 'notify',
+								requestId: response.stanzaId!
+							})
+						}, 500)
 					}
 				}
 			}
 
+		case proto.Message.ProtocolMessage.Type.MESSAGE_EDIT:
+			ev.emit(
+				'messages.update',
+				[
+					{
+					  // flip the sender / fromMe properties because they're in the perspective of the sender
+						key: { ...message.key, id: protocolMsg.key?.id },
+						update: {
+							message: {
+								editedMessage: {
+									message: protocolMsg.editedMessage
+								}
+							},
+							messageTimestamp: protocolMsg.timestampMs
+								? Math.floor(toNumber(protocolMsg.timestampMs) / 1000)
+								: message.messageTimestamp
+						}
+					}
+				]
+			)
 			break
 		}
 	} else if(content?.reactionMessage) {
@@ -288,10 +326,10 @@ const processMessage = async(
 		}
 		ev.emit('messages.reaction', [{
 			reaction,
-			key: content.reactionMessage!.key!,
+			key: content.reactionMessage?.key!,
 		}])
 	} else if(message.messageStubType) {
-		const jid = message.key!.remoteJid!
+		const jid = message.key?.remoteJid!
 		//let actor = whatsappID (message.participant)
 		let participants: string[]
 		const emitParticipantsUpdate = (action: ParticipantAction) => (
@@ -353,6 +391,11 @@ const processMessage = async(
 			chat.name = name
 			emitGroupUpdate({ subject: name })
 			break
+		case WAMessageStubType.GROUP_CHANGE_DESCRIPTION:
+			const description = message.messageStubParameters?.[0]
+			chat.description = description
+			emitGroupUpdate({ desc: description })
+			break
 		case WAMessageStubType.GROUP_CHANGE_INVITE_LINK:
 			const code = message.messageStubParameters?.[0]
 			emitGroupUpdate({ inviteCode: code })
@@ -373,14 +416,16 @@ const processMessage = async(
 			break
 		}
 
-	} else if(content?.pollUpdateMessage) {
+	} /*  else if(content?.pollUpdateMessage) {
 		const creationMsgKey = content.pollUpdateMessage.pollCreationMessageKey!
 		// we need to fetch the poll creation message to get the poll enc key
+		// TODO: make standalone, remove getMessage reference
+		// TODO: Remove entirely
 		const pollMsg = await getMessage(creationMsgKey)
 		if(pollMsg) {
 			const meIdNormalised = jidNormalizedUser(meId)
 			const pollCreatorJid = getKeyAuthor(creationMsgKey, meIdNormalised)
-			const voterJid = getKeyAuthor(message.key!, meIdNormalised)
+			const voterJid = getKeyAuthor(message.key, meIdNormalised)
 			const pollEncKey = pollMsg.messageContextInfo?.messageSecret!
 
 			try {
@@ -419,7 +464,7 @@ const processMessage = async(
 				'poll creation message not found, cannot decrypt update'
 			)
 		}
-	}
+		} */
 
 	if(Object.keys(chat).length > 1) {
 		ev.emit('chats.update', [chat])

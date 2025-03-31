@@ -1,10 +1,11 @@
 
 import { AxiosRequestConfig } from 'axios'
 import type { Agent } from 'https'
-import type { Logger } from 'pino'
 import type { URL } from 'url'
 import { proto } from '../../WAProto'
+import { ILogger } from '../Utils/logger'
 import { AuthenticationState, SignalAuthState, TransactionCapabilityOptions } from './Auth'
+import { GroupMetadata } from './GroupMetadata'
 import { MediaConnInfo } from './Message'
 import { SignalRepository } from './Signal'
 
@@ -22,6 +23,8 @@ export type CacheStore = {
     flushAll(): void
 }
 
+export type PatchedMessageWithRecipientJID = proto.IMessage & {recipientJid?: string}
+
 export type SocketConfig = {
     /** the WS url to connect to WA */
     waWebSocketUrl: string | URL
@@ -31,20 +34,24 @@ export type SocketConfig = {
     defaultQueryTimeoutMs: number | undefined
     /** ping-pong interval for WS connection */
     keepAliveIntervalMs: number
-	/** should baileys use the mobile api instead of the multi device api */
+	/** should baileys use the mobile api instead of the multi device api
+     * @deprecated This feature has been removed
+    */
 	mobile?: boolean
     /** proxy agent */
     agent?: Agent
-    /** pino logger */
-    logger: Logger
+    /** logger */
+    logger: ILogger
     /** version to connect with */
     version: WAVersion
     /** override browser config */
     browser: WABrowserDescription
     /** agent used for fetch requests -- uploading/downloading media */
     fetchAgent?: Agent
-    /** should the QR be printed in the terminal */
-    printQRInTerminal: boolean
+    /** should the QR be printed in the terminal
+    * @deprecated This feature has been removed
+    */
+    printQRInTerminal?: boolean
     /** should events be emitted for actions done by this socket connection */
     emitOwnEvents: boolean
     /** custom upload hosts to upload media to */
@@ -63,7 +70,8 @@ export type SocketConfig = {
     transactionOpts: TransactionCapabilityOptions
     /** marks the client as online whenever the socket successfully connects */
     markOnlineOnConnect: boolean
-
+    /** alphanumeric country code (USA -> US) for the number used */
+    countryCode: string
     /** provide a cache to store media, so does not have to be re-uploaded */
     mediaCache?: CacheStore
     /**
@@ -74,6 +82,8 @@ export type SocketConfig = {
     userDevicesCache?: CacheStore
     /** cache to store call offers */
     callOfferCache?: CacheStore
+    /** cache to track placeholder resends */
+    placeholderResendCache?: CacheStore
     /** width for link preview images */
     linkPreviewImageThumbnailWidth: number
     /** Should Baileys ask the phone for full history, will be received async */
@@ -98,8 +108,8 @@ export type SocketConfig = {
      * */
     patchMessageBeforeSending: (
         msg: proto.IMessage,
-        recipientJids: string[],
-    ) => Promise<proto.IMessage> | proto.IMessage
+        recipientJids?: string[],
+    ) => Promise<PatchedMessageWithRecipientJID[] | PatchedMessageWithRecipientJID> | PatchedMessageWithRecipientJID[] | PatchedMessageWithRecipientJID
 
     /** verify app state MACs */
     appStateMacVerification: {
@@ -116,8 +126,8 @@ export type SocketConfig = {
      * */
     getMessage: (key: proto.IMessageKey) => Promise<proto.IMessage | undefined>
 
-    makeSignalRepository: (auth: SignalAuthState) => SignalRepository
+    /** cached group metadata, use to prevent redundant requests to WA & speed up msg sending */
+    cachedGroupMetadata: (jid: string) => Promise<GroupMetadata | undefined>
 
-    /** Socket passthrough */
-    socket?: any
+    makeSignalRepository: (auth: SignalAuthState) => SignalRepository
 }
