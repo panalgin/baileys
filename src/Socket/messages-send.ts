@@ -282,7 +282,7 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 	) => {
 		let patched = await patchMessageBeforeSending(message, jids)
 		if(!Array.isArray(patched)) {
-		  patched = [{ recipientJid: jids[0], ...patched }]
+		  patched = jids ? jids.map(jid => ({ recipientJid: jid, ...patched })) : [patched]
 		}
 
 		let shouldIncludeDeviceIdentity = false
@@ -290,21 +290,21 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 		const nodes = await Promise.all(
 			patched.map(
 				async patchedMessageWithJid => {
-				  const { recipientJid: jid, ...patchedMessage } = patchedMessageWithJid
+					const { recipientJid: jid, ...patchedMessage } = patchedMessageWithJid
 					if(!jid) {
 					  return {} as BinaryNode
 					}
 
 					const bytes = encodeWAMessage(patchedMessage)
 					const { type, ciphertext } = await signalRepository
-						.encryptMessage({ jid: jid, data: bytes })
+						.encryptMessage({ jid, data: bytes })
 					if(type === 'pkmsg') {
 						shouldIncludeDeviceIdentity = true
 					}
 
 					const node: BinaryNode = {
 						tag: 'to',
-						attrs: { jid: jid },
+						attrs: { jid },
 						content: [{
 							tag: 'enc',
 							attrs: {
@@ -406,6 +406,13 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 							participantsList.push(...statusJidList)
 						}
 
+						if(!isStatus) {
+							additionalAttributes = {
+								...additionalAttributes,
+								addressing_mode: groupData?.addressingMode || 'pn'
+							}
+						}
+
 						const additionalDevices = await getUSyncDevices(participantsList, !!useUserDevicesCache, false)
 						devices.push(...additionalDevices)
 					}
@@ -429,7 +436,7 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 					const senderKeyJids: string[] = []
 					// ensure a connection is established with every device
 					for(const { user, device } of devices) {
-						const jid = jidEncode(user, isLid ? 'lid' : 's.whatsapp.net', device)
+						const jid = jidEncode(user, groupData?.addressingMode === 'lid' ? 'lid' : 's.whatsapp.net', device)
 						if(!senderKeyMap[jid] || !!participant) {
 							senderKeyJids.push(jid)
 							// store that this person has had the sender keys sent to them
