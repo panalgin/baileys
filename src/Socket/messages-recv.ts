@@ -640,7 +640,7 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 		const props_version = propsNode?.attrs.version
 
 		if (propNodes.length && props_version) {
-			const props = {}
+			const props: Record<string, string> = {}
 
 			propNodes.forEach(pNode => {
 				if (pNode.attrs.name && pNode.attrs.value) {
@@ -655,7 +655,7 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 		const categoryPrivacy = getBinaryNodeChildren(privacyNode, 'category')
 
 		if (categoryPrivacy.length) {
-			const privacy = {}
+			const privacy: Record<string, string> = {}
 
 			categoryPrivacy.forEach(cNode => {
 				if (cNode.attrs.name && cNode.attrs.value) {
