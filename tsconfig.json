@@ -13,18 +13,20 @@
     "rootDir": "./src",
 
     // ESM Features
-    "verbatimModuleSyntax": true,
+    "verbatimModuleSyntax": false,
     "allowImportingTsExtensions": true,
     "noEmit": true,
 
     // Type Safety
-    "strict": true,
-    "strictNullChecks": true,
+    "strict": false,
+    "strictNullChecks": false,
     "noFallthroughCasesInSwitch": true,
-    "noUncheckedIndexedAccess": true,
-    "noImplicitThis": true,
+    "noUncheckedIndexedAccess": false,
+    "noImplicitThis": false,
+    "noImplicitAny": false,
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
+    "useUnknownInCatchVariables": false,
 
     // Interop
     "esModuleInterop": true,

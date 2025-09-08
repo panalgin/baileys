@@ -634,6 +634,41 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 		}
 	}
 
+	const handleConfiguration = async (node: BinaryNode) => {
+		const isNotification = node.tag === 'notification'
+
+		const propsNode = getBinaryNodeChild(node, 'props')
+		const propNodes = getBinaryNodeChildren(propsNode, 'prop')
+		const props_version = propsNode?.attrs.version
+
+		if (propNodes.length && props_version) {
+			const props: Record<string, string> = {}
+
+			propNodes.forEach(pNode => {
+				if (pNode.attrs.name && pNode.attrs.value) {
+					props[pNode.attrs.name] = pNode.attrs.value
+				}
+			})
+
+			ev.emit(isNotification ? 'configuration.update' : 'configuration.set', { props, props_version })
+		}
+
+		const privacyNode = getBinaryNodeChild(node, 'privacy')
+		const categoryPrivacy = getBinaryNodeChildren(privacyNode, 'category')
+
+		if (categoryPrivacy.length) {
+			const privacy: Record<string, string> = {}
+
+			categoryPrivacy.forEach(cNode => {
+				if (cNode.attrs.name && cNode.attrs.value) {
+					privacy[cNode.attrs.name] = cNode.attrs.value
+				}
+			})
+
+			ev.emit(isNotification ? 'configuration.update' : 'configuration.set', { privacy })
+		}
+	}
+
 	const handleReceipt = async (node: BinaryNode) => {
 		const { attrs, content } = node
 		const isLid = attrs.from!.includes('lid')
@@ -964,7 +999,6 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 				callOfferCache.set(callId, callLid)
 			}
 		}
-
 		const call: WACallEvent = {
 			chatId: attrs.from!,
 			from,
@@ -1286,11 +1320,20 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 		handleBadAck(node).catch(error => onUnexpectedError(error, 'handling bad ack'))
 	})
 
+	ws.on('CB:iq,,props', (node: BinaryNode) => {
+		processNodeWithBuffer(node, 'processing props', handleConfiguration)
+	})
+	ws.on('CB:iq,,privacy', (node: BinaryNode) => {
+		processNodeWithBuffer(node, 'processing privacy', handleConfiguration)
+	})
+	ws.on('CB:notification,,privacy', (node: BinaryNode) => {
+		processNodeWithBuffer(node, 'processing privacy', handleConfiguration)
+	})
+
 	ev.on('call', ([call]) => {
 		if (!call) {
 			return
 		}
-
 		// missed call + group call notification message generation
 		if (call.status === 'timeout' || (call.status === 'offer' && call.isGroup)) {
 			const msg: proto.IWebMessageInfo = {

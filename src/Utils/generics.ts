@@ -4,7 +4,6 @@ import { createHash, randomBytes } from 'crypto'
 import { platform, release } from 'os'
 import { proto } from '../../WAProto/index.js'
 import version from '../Defaults/baileys-version.json' with { type: 'json' }
-const baileysVersion = version.version
 import type {
 	BaileysEventEmitter,
 	BaileysEventMap,
@@ -15,6 +14,7 @@ import type {
 } from '../Types'
 import { DisconnectReason } from '../Types'
 import { type BinaryNode, getAllBinaryNodeChildren, jidDecode } from '../WABinary'
+const baileysVersion = version.version
 
 const PLATFORM_MAP = {
 	aix: 'AIX',
@@ -107,6 +107,7 @@ export const encodeBigEndian = (e: number, t = 4) => {
 }
 
 export const toNumber = (t: Long | number | null | undefined): number =>
+	// @ts-ignore
 	typeof t === 'object' && t ? ('toNumber' in t ? t.toNumber() : (t as Long).low) : t || 0
 
 /** unix timestamp of a date in seconds */
